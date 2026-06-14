@@ -55,7 +55,7 @@ class HNSWIndex:
         Moves from node to neighbor only if the neighbor is closer to the query vector.
         """
         curr_node = enter_node
-        curr_dist = self.get_distance_to_vector(query_vec, curr_node)
+        curr_dist = self._get_distance_to_vector(query_vec, curr_node)
         
         layer_graph = self.graphs[level]
         changed = True
@@ -187,3 +187,29 @@ class HNSWIndex:
         if insert_level > self.max_level or self.enter_node is None:
             self.max_level = insert_level
             self.enter_node = node_id
+    def query_hnsw(self, query_vector: List[float], k: int = 5) -> List[Tuple[int, float]]:
+        """
+        Queries the multi-layer HNSW graph for the approximate k-nearest neighbors.
+        
+        :param query_vector: High-dimensional query array list.
+        :param k: Number of nearest neighbors to return.
+        :return: A list of tuples containing (node_id, distance).
+        """
+        if self.enter_node is None:
+            return []
+            
+        query_vec = np.array(query_vector, dtype=np.float32)
+        curr_enter_nodes = [self.enter_node]
+        
+        # 1. Fast routing down through upper sparse layers
+        for lvl in range(self.max_level, 0, -1):
+            closest_node = self.search_layer_greedy(query_vec, curr_enter_nodes[0], lvl)
+            curr_enter_nodes = [closest_node]
+            
+        # 2. Fine-grained beam search on the dense bottom layer (Layer 0)
+        # We search with depth 'ef_search' to ensure high accuracy
+        candidates = self.search_layer(query_vec, curr_enter_nodes, self.ef_search, level=0)
+        
+        # 3. Sort and slice the results to return the top k elements
+        candidates.sort(key=lambda x: x[0])
+        return [(node_id, float(dist)) for dist, node_id in candidates[:k]]
